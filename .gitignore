@@ -1,5 +1,4 @@
 
-
 __pycache__/
 *.py[cod]
 *$py.class
@@ -7,4 +6,5 @@ __pycache__/
 
 venv/
 env/
+.venv/
 .env
