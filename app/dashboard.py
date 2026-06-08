@@ -11,7 +11,7 @@ from lstm_model import BatteryLSTM
 
 st.set_page_config(page_title="EV Battery Health Predictor", layout="centered")
 st.title("EV Battery Degradation & Health Predictor")
-st.write("Upload the previous 10 cycles of battery sensor logs to predict current State of Health (SOH).")
+st.write("Upload the previous 10 cycles of battery sensor logs to predict current State of Health (SOH) and estimate Remaining Useful Life (RUL).")
 
 @st.cache_resource
 def load_model():
@@ -40,19 +40,30 @@ if uploaded_file is not None:
             with st.spinner('Analyzing sensor sequences...'):
                 scaler = MinMaxScaler()
                 scaled_data = scaler.fit_transform(df[required_cols])
-
-                recent_sequence = scaled_data[-10:] 
-
+                recent_sequence = scaled_data[-10:]
                 tensor_input = torch.tensor(recent_sequence, dtype=torch.float32).unsqueeze(0)
-
+                
                 with torch.no_grad():
                     prediction = model(tensor_input).item()
                 
                 health_percentage = prediction * 100
                 
+                eol_threshold = 70.0
+                n_cycles = df['cycle'].iloc[-1]- df['cycle'].iloc[0]
+                if n_cycles > 0:
+                    capacity_fade_rate = (df['Capacity_Fade'].iloc[-1]- df['Capacity_Fade'].iloc[0])/n_cycles
+                    soh_decline_per_cycle = capacity_fade_rate*100
+                else:
+                    soh_decline_per_cycle = 0
+                
+                if health_percentage > eol_threshold and soh_decline_per_cycle > 0:
+                    rul_cycles = int((health_percentage - eol_threshold)/soh_decline_per_cycle)
+                else:
+                    rul_cycles = 0
+                
                 st.write("---")
                 st.subheader("Prediction Results")
-                
+                 
                 if health_percentage >= 85:
                     risk = "Low"
                     color = "green"
@@ -62,7 +73,13 @@ if uploaded_file is not None:
                 else:
                     risk = "High (Replacement Recommended)"
                     color = "red"
-                
-                col1, col2 = st.columns(2)
+                    
+                col1, col2, col3 = st.columns(3)
                 col1.metric("State of Health (SOH)", f"{health_percentage:.1f}%")
-                col2.markdown(f"**Risk Level:** <span style='color:{color}'>{risk}</span>", unsafe_allow_html=True)
+                col2.metric("Remaining Useful Life", f"{rul_cycles} cycles" if rul_cycles > 0 else "End of Life")
+                col3.markdown(f"**Risk Level:** <span style='color:{color}'>{risk}</span>", unsafe_allow_html=True)
+                
+                st.write("---")
+                st.caption(f"RUL is estimated by extrapolating the observed degradation rate "
+                           f"({soh_decline_per_cycle:.4f}% per cycle) until SOH reaches the "
+                           f"{eol_threshold:.0f}% end-of-life threshold.")
